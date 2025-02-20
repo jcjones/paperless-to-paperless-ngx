@@ -203,12 +203,19 @@ def run():
     correspondants = PaperlessField(session, args.url + "/api/correspondents/")
     tags = PaperlessField(session, args.url + "/api/tags/")
 
-    for index, receipt in enumerate(progressbar.progressbar(query)):
+    todo_receipts = {}
+    for index, receipt in enumerate(query):
         if index < args.start:
             continue
         if args.count and index >= args.start + args.count:
             break
+        todo_receipts[index] = receipt
 
+    logging.info(
+        "Starting from %s, there are %s receipts to go.", args.start, len(todo_receipts)
+    )
+
+    for index, receipt in progressbar.progressbar(todo_receipts.items()):
         _file_name = file_name(index, receipt)
 
         files = {
