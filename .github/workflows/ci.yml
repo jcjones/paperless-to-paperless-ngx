@@ -1,0 +1,36 @@
+name: Partition Manager CI
+
+on: [push, pull_request]
+
+jobs:
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.9
+
+    - name: Install Linting Tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install --user ruff validate-pyproject[all]
+
+    - name: Build paperless-to-paperless-ngx
+      run: |
+        pip install --user --editable "."
+
+    - name: Lint Python code with Ruff
+      run: |
+        python -m ruff check --output-format=github
+
+    - name: Checking format with Ruff
+      run: |
+        python -m ruff format --check .
+
+    - name: Checking pyproject
+      run: |
+        validate-pyproject pyproject.toml

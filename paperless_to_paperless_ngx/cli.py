@@ -2,6 +2,7 @@ from pathlib import Path
 from time import sleep
 from datetime import datetime
 import argparse
+import contextlib
 import logging
 
 import requests
@@ -104,17 +105,12 @@ def file_name(index, receipt):
 
 def collect_tags(receipt):
     tags = []
-    try:
+    with contextlib.suppress(Category.DoesNotExist):
         tags.append(receipt.category.name.lower())
-    except Category.DoesNotExist:
-        pass
-    try:
+    with contextlib.suppress(SubCategory.DoesNotExist):
         tags.append(receipt.subcategory.name.lower())
-    except SubCategory.DoesNotExist:
-        pass
 
-    for rtag in receipt.receipt_tags:
-        tags.append(rtag.tag.name.strip().lower())
+    tags.extend([rtag.tag.name.strip().lower() for rtag in receipt.receipt_tags])
 
     return set(tags)
 
@@ -163,7 +159,7 @@ class PaperlessField:
                 break
             get_url = data["next"].replace("http:", "https:")
 
-    def get(self, name):
+    def get_or_put(self, name):
         if name not in self._name_to_id:
             self.put(name)
         return self._name_to_id[name]
@@ -187,8 +183,7 @@ def find_date(receipt):
     return datetime.strptime(f"{date_str} +0000", "Documents/%Y/%m/%d %z")
 
 
-def run():
-    # create_out_dir(OUT_PATH)
+def main():
     args = PARSER.parse_args()
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     logging.basicConfig(level=args.log_level, format=log_format)
@@ -217,13 +212,6 @@ def run():
 
     for index, receipt in progressbar.progressbar(todo_receipts.items()):
         _file_name = file_name(index, receipt)
-
-        files = {
-            "document": (
-                Path(receipt.path).name,
-                open(args.library / receipt.path, "rb"),
-            )
-        }
         data = {
             "title": _file_name,
             "created": find_date(receipt),
@@ -237,22 +225,31 @@ def run():
             receipt.amount,
             receipt.amount_s,
         )
+
         if args.noop:
+            # Stop before the get_or_add operations
             continue
 
-        tag_list = []
-        for tag_name in collect_tags(receipt):
-            tag_list.append(tags.get(tag_name))
+        tag_list = [tags.get_or_put(tag_name) for tag_name in collect_tags(receipt)]
         if tag_list:
             data["tags"] = tag_list
 
         if receipt.merchant:
-            data["correspondent"] = correspondants.get(receipt.merchant)
+            data["correspondent"] = correspondants.get_or_put(receipt.merchant)
 
-        result = session.post(
-            args.url + "/api/documents/post_document/", data=data, files=files
-        )
-        result.raise_for_status()
+
+        with Path(args.library / receipt.path).open("rb") as receipt_fp:
+            files = {
+                "document": (
+                    Path(receipt.path).name,
+                    receipt_fp,
+                )
+            }
+
+            result = session.post(
+                args.url + "/api/documents/post_document/", data=data, files=files
+            )
+            result.raise_for_status()
         uuid = result.text.strip('"')
         logging.info("Task submitted: %s", uuid)
 
@@ -282,4 +279,4 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    main()
