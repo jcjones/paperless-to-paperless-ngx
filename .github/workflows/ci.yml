@@ -1,6 +1,10 @@
-name: Partition Manager CI
+name: ci-build
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ main, release/** ]
+  pull_request:
+  workflow_dispatch:
 
 jobs:
 
@@ -20,17 +24,13 @@ jobs:
         pip install --user ruff validate-pyproject[all]
 
     - name: Build paperless-to-paperless-ngx
-      run: |
-        pip install --user --editable "."
+      run: pip install --user --editable "."
 
     - name: Lint Python code with Ruff
-      run: |
-        python -m ruff check --output-format=github
+      run: python -m ruff check --output-format=github
 
     - name: Checking format with Ruff
-      run: |
-        python -m ruff format --check .
+      run: python -m ruff format --check .
 
     - name: Checking pyproject
-      run: |
-        validate-pyproject pyproject.toml
+      run: validate-pyproject pyproject.toml
