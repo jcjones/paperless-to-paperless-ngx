@@ -1,13 +1,20 @@
 from pathlib import Path
 from time import sleep
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 import argparse
-import json
 import logging
 
 import requests
 import progressbar
-from peewee import *
+from peewee import (
+    CharField,
+    ForeignKeyField,
+    IntegerField,
+    Model,
+    FloatField,
+    TextField,
+    SqliteDatabase,
+)
 
 DB = SqliteDatabase(None)
 OUT_PATH = "doc_output"
@@ -21,12 +28,15 @@ PARSER.add_argument(
     type=lambda x: getattr(logging, x.upper()),
     help="Configure the logging level.",
 )
-PARSER.add_argument("library", type=Path, help="The path to 'Receipt Library.paperless'")
+PARSER.add_argument(
+    "library", type=Path, help="The path to 'Receipt Library.paperless'"
+)
 PARSER.add_argument("--auth", help="Auth token", required=True)
 PARSER.add_argument("--noop", action="store_true")
 PARSER.add_argument("--url", required=True)
 PARSER.add_argument("--start", type=int, default=0)
 PARSER.add_argument("--count", type=int, default=None)
+
 
 class BaseModel(Model):
     class Meta:
@@ -91,6 +101,7 @@ def file_name(index, receipt):
     except Category.DoesNotExist:
         return f"{index}-no-name.pdf"
 
+
 def collect_tags(receipt):
     tags = []
     try:
@@ -107,27 +118,33 @@ def collect_tags(receipt):
 
     return set(tags)
 
+
 def wait_for_doc_publication(session, url, uuid):
     while True:
         result = session.get(url + f"/api/tasks/?task_id={uuid}")
         result.raise_for_status()
         task_results = result.json()[0]
-        logging.debug("%s status is %s", uuid, task_results['status'])
+        logging.debug("%s status is %s", uuid, task_results["status"])
 
-        if task_results['status'] in ["PENDING", "STARTED"]:
+        if task_results["status"] in ["PENDING", "STARTED"]:
             sleep(2)
             continue
 
-        if task_results['status'] in ["SUCCESS"]:
-            return task_results['related_document'], True
+        if task_results["status"] in ["SUCCESS"]:
+            return task_results["related_document"], True
 
-        if 'is a duplicate of' in task_results['result']:
-            logging.warning("%s was a duplicate of DocID %s", task_results['task_file_name'], task_results['related_document'])
-            return task_results['related_document'], False
+        if "is a duplicate of" in task_results["result"]:
+            logging.warning(
+                "%s was a duplicate of DocID %s",
+                task_results["task_file_name"],
+                task_results["related_document"],
+            )
+            return task_results["related_document"], False
 
-        logging.error("Result: [%s] %s", task_results['status'], task_results)
+        logging.error("Result: [%s] %s", task_results["status"], task_results)
         raise Exception("Unexpected publication status", task_results)
         # return None, False
+
 
 class PaperlessField:
     def __init__(self, session, url):
@@ -140,11 +157,11 @@ class PaperlessField:
             result = self._session.get(get_url)
             result.raise_for_status()
             data = result.json()
-            for c in data['results']:
-                self._name_to_id[c['name']] = c['id']
-            if not data['next']:
+            for c in data["results"]:
+                self._name_to_id[c["name"]] = c["id"]
+            if not data["next"]:
                 break
-            get_url = data['next'].replace("http:", "https:")
+            get_url = data["next"].replace("http:", "https:")
 
     def get(self, name):
         if name not in self._name_to_id:
@@ -158,15 +175,17 @@ class PaperlessField:
         return self.get(name)
 
     def put(self, name):
-        data={'name': name}
+        data = {"name": name}
         result = self._session.post(self._url, data=data)
         result.raise_for_status()
-        self._name_to_id[name] = result.json()['id']
+        self._name_to_id[name] = result.json()["id"]
+
 
 def find_date(receipt):
-    last_element = receipt.path.rfind('/')
+    last_element = receipt.path.rfind("/")
     date_str = receipt.path[:last_element]
     return datetime.strptime(f"{date_str} +0000", "Documents/%Y/%m/%d %z")
+
 
 def run():
     # create_out_dir(OUT_PATH)
@@ -179,10 +198,10 @@ def run():
 
     query = Receipt.select(Receipt)
     session = requests.Session()
-    session.headers = { 'Authorization': f"Token {args.auth}" }
+    session.headers = {"Authorization": f"Token {args.auth}"}
 
-    correspondants=PaperlessField(session, args.url + "/api/correspondents/")
-    tags=PaperlessField(session, args.url + "/api/tags/")
+    correspondants = PaperlessField(session, args.url + "/api/correspondents/")
+    tags = PaperlessField(session, args.url + "/api/tags/")
 
     for index, receipt in enumerate(progressbar.progressbar(query)):
         if index < args.start:
@@ -192,13 +211,25 @@ def run():
 
         _file_name = file_name(index, receipt)
 
-        files={'document': (Path(receipt.path).name, open(args.library / receipt.path, 'rb'))}
-        data={
-            'title': _file_name,
-            'created': find_date(receipt),
+        files = {
+            "document": (
+                Path(receipt.path).name,
+                open(args.library / receipt.path, "rb"),
+            )
+        }
+        data = {
+            "title": _file_name,
+            "created": find_date(receipt),
         }
 
-        logging.info("%d: Processing %s [%s] %f %s", index, args.library / receipt.path, data, receipt.amount, receipt.amount_s)
+        logging.info(
+            "%d: Processing %s [%s] %f %s",
+            index,
+            args.library / receipt.path,
+            data,
+            receipt.amount,
+            receipt.amount_s,
+        )
         if args.noop:
             continue
 
@@ -206,12 +237,14 @@ def run():
         for tag_name in collect_tags(receipt):
             tag_list.append(tags.get(tag_name))
         if tag_list:
-            data['tags'] = tag_list
+            data["tags"] = tag_list
 
         if receipt.merchant:
-            data['correspondent'] = correspondants.get(receipt.merchant)
+            data["correspondent"] = correspondants.get(receipt.merchant)
 
-        result = session.post(args.url + "/api/documents/post_document/", data=data, files=files)
+        result = session.post(
+            args.url + "/api/documents/post_document/", data=data, files=files
+        )
         result.raise_for_status()
         uuid = result.text.strip('"')
         logging.info("Task submitted: %s", uuid)
@@ -220,19 +253,26 @@ def run():
 
         post_updates = {}
         if receipt.amount > 0:
-            post_updates['custom_fields'] = [{'field': 1, 'value': f"USD{receipt.amount}" }]
+            post_updates["custom_fields"] = [
+                {"field": 1, "value": f"USD{receipt.amount}"}
+            ]
         if receipt.notes:
-            post_updates['notes'] = receipt.notes.strip()
+            post_updates["notes"] = receipt.notes.strip()
 
         if post_updates:
             if not doc_id:
-                logging.error("Can't update notes and such for %d: [%s]", index, _file_name)
+                logging.error(
+                    "Can't update notes and such for %d: [%s]", index, _file_name
+                )
             else:
-                result = session.patch(args.url + f"/api/documents/{doc_id}/", json=post_updates)
+                result = session.patch(
+                    args.url + f"/api/documents/{doc_id}/", json=post_updates
+                )
                 result.raise_for_status()
 
         logging.info("done with IDX %d: [%s] DocID: %s", index, _file_name, doc_id)
-        logging.info("Use --start from %d", index+1)
+        logging.info("Use --start from %d", index + 1)
+
 
 if __name__ == "__main__":
     run()
