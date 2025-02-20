@@ -237,7 +237,6 @@ def main():
         if receipt.merchant:
             data["correspondent"] = correspondants.get_or_put(receipt.merchant)
 
-
         with Path(args.library / receipt.path).open("rb") as receipt_fp:
             files = {
                 "document": (
